@@ -146,7 +146,7 @@ namespace SolarSystem
         private ResourceLayout _resourceLayout = null!;
         private Sampler _sampler = null!;
         private DeviceTexture _greenPixel = null!;
-        private ResourceSet _whitePixelResourceSet = null!;
+        private ResourceSet _greenPixelResourceSet = null!;
 
         // controls texture for top-left message
         private DeviceTexture? _controlsTexture = null;
@@ -354,15 +354,43 @@ void main()
 
             // Create reusable white pixel texture for force visualization
             _greenPixel = new DeviceTexture(_graphicsDevice, 1, 1, new RgbaFloat[] { new RgbaFloat(0f, 1f, 0f, 0.5f) });
-            _whitePixelResourceSet = _graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(
+            _greenPixelResourceSet = _graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(
                 _resourceLayout,
                 _projectionBuffer,
                 _greenPixel.TextureView,
                 _sampler));
 
+            // get list of installed fonts
+            InstalledFontCollection installedFontCollection = new InstalledFontCollection();
+            string[] fontNames = new string[installedFontCollection.Families.Length];
+
+            int i = 0;
+            foreach (FontFamily fontFamily in installedFontCollection.Families)
+            {
+                fontNames[i++] = fontFamily.Name;
+            }
+            string selectedFont = fontNames[0];
+            ;
+            if (Array.Exists(fontNames, name => name == "Arial"))
+            {
+                selectedFont = "Arial";
+            }
+            else if (Array.Exists(fontNames, name => name == "Tahoma"))
+            {
+                selectedFont = "Tahoma";
+            }
+            else if (Array.Exists(fontNames, name => name == "Verdana"))
+            {
+                selectedFont = "Verdana";
+            }
+            else if (Array.Exists(fontNames, name => name == "Calibri"))
+            {
+                selectedFont = "Calibri";
+            }
+
             // Create controls texture (top-left message)
-            string controlsMessage = "Space: restart    Left/Right: next/prev\nF: toggle forces    Esc: exit";
-            using Font font = new Font("Segoe UI", 18f, FontStyle.Regular, GraphicsUnit.Pixel);
+            string controlsMessage = "Space: restart Left/Right: next/prev\nF: toggle forces Esc: exit";
+            Font font = new Font(selectedFont, 18f, FontStyle.Regular, GraphicsUnit.Pixel);
             _controlsTexture = CreateTextTextureFromString(controlsMessage, font, Color.FromArgb(230, 255, 255, 255));
         }
 
@@ -730,7 +758,7 @@ void main()
                 // Calculate net force on this body
                 Vector2 netForce = Bodies.AllBodies(from);
                 float forceMagnitude = netForce.Length();
-                
+
                 if (forceMagnitude < 0.01f) continue; // Skip negligible forces
 
                 Vector2 forceNormalized = Vector2.Normalize(netForce);
@@ -760,7 +788,7 @@ void main()
             Vector2 p3 = end - perpendicular;
             Vector2 p4 = end + perpendicular;
 
-            _commandList.SetGraphicsResourceSet(0, _whitePixelResourceSet);
+            _commandList.SetGraphicsResourceSet(0, _greenPixelResourceSet);
 
             VertexPositionTexture[] vertices = new VertexPositionTexture[]
             {
@@ -778,7 +806,7 @@ void main()
         {
             // Create arrowhead pointing in the direction of the force
             Vector2 perpendicular = new Vector2(-direction.Y, direction.X);
-            
+
             Vector2 p1 = tip;
             Vector2 p2 = tip - direction * size + perpendicular * (size * 0.5f);
             Vector2 p3 = tip - direction * size - perpendicular * (size * 0.5f);
@@ -786,7 +814,7 @@ void main()
             // Draw as a filled triangle (use two triangles to form it)
             Vector2 center = (p1 + p2 + p3) / 3;
 
-            _commandList.SetGraphicsResourceSet(0, _whitePixelResourceSet);
+            _commandList.SetGraphicsResourceSet(0, _greenPixelResourceSet);
 
             VertexPositionTexture[] vertices = new VertexPositionTexture[]
             {
@@ -970,7 +998,7 @@ void main()
             }
 
             _controlsTexture?.Dispose();
-            _whitePixelResourceSet?.Dispose();
+            _greenPixelResourceSet?.Dispose();
             _greenPixel?.Dispose();
             _pipeline.Dispose();
             _commandList.Dispose();
