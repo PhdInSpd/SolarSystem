@@ -1,15 +1,16 @@
+using PlcTools;
 using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using System.Numerics;
+using System.Resources;
 using System.Runtime.InteropServices;
 using Veldrid;
 using Veldrid.Sdl2;
-using Veldrid.StartupUtilities;
 using Veldrid.SPIRV;
-using PlcTools;
-using System.Drawing;
-using System.Drawing.Text;
-using System.Drawing.Drawing2D;
+using Veldrid.StartupUtilities;
 
 namespace SolarSystem
 {
@@ -87,10 +88,18 @@ namespace SolarSystem
     {
         public Texture Texture { get; }
         public TextureView TextureView { get; }
+        public Veldrid.ResourceSet ResourceSet { get; }
         public uint Width { get; }
         public uint Height { get; }
 
-        public DeviceTexture(GraphicsDevice device, uint width, uint height, RgbaFloat[] data)
+        public DeviceTexture(
+            GraphicsDevice device,
+            ResourceLayout layout,
+            DeviceBuffer projectionBuffer,
+            Sampler sampler,
+            uint width,
+            uint height,
+            RgbaFloat[] data)
         {
             Width = width;
             Height = height;
@@ -111,10 +120,17 @@ namespace SolarSystem
             }
 
             device.UpdateTexture(Texture, pixelData, 0, 0, 0, width, height, 1, 0, 0);
+
+            ResourceSet = device.ResourceFactory.CreateResourceSet(new ResourceSetDescription(
+                layout,
+                projectionBuffer,
+                TextureView,
+                sampler));
         }
 
         public void Dispose()
         {
+            ResourceSet.Dispose();
             TextureView.Dispose();
             Texture.Dispose();
         }
@@ -146,7 +162,7 @@ namespace SolarSystem
         private ResourceLayout _resourceLayout = null!;
         private Sampler _sampler = null!;
         private DeviceTexture _greenPixel = null!;
-        private ResourceSet _greenPixelResourceSet = null!;
+        private Veldrid.ResourceSet _greenPixelResourceSet = null!;
 
         // controls texture for top-left message
         private DeviceTexture? _controlsTexture = null;
@@ -327,7 +343,7 @@ void main()
                 BlendState = BlendStateDescription.SingleAlphaBlend,
                 DepthStencilState = DepthStencilStateDescription.Disabled,
                 RasterizerState = new RasterizerStateDescription(
-                    cullMode: FaceCullMode.Back,
+                    cullMode: FaceCullMode.None,
                     fillMode: PolygonFillMode.Solid,
                     frontFace: FrontFace.Clockwise,
                     depthClipEnabled: true,
@@ -353,12 +369,15 @@ void main()
             }
 
             // Create reusable white pixel texture for force visualization
-            _greenPixel = new DeviceTexture(_graphicsDevice, 1, 1, new RgbaFloat[] { new RgbaFloat(0f, 1f, 0f, 0.5f) });
-            _greenPixelResourceSet = _graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(
+            _greenPixel = new DeviceTexture(
+                _graphicsDevice,
                 _resourceLayout,
                 _projectionBuffer,
-                _greenPixel.TextureView,
-                _sampler));
+                _sampler,
+                1,
+                1,
+                new RgbaFloat[] { new RgbaFloat(0f, 1f, 0f, 0.5f) });
+            _greenPixelResourceSet = _greenPixel.ResourceSet;
 
             // get list of installed fonts
             InstalledFontCollection installedFontCollection = new InstalledFontCollection();
@@ -442,7 +461,14 @@ void main()
                             }
                         }
 
-                        return new DeviceTexture(_graphicsDevice, (uint)width, (uint)height, data);
+                        return new DeviceTexture(
+                            _graphicsDevice,
+                            _resourceLayout,
+                            _projectionBuffer,
+                            _sampler,
+                            (uint)width,
+                            (uint)height,
+                            data);
                     }
                     finally
                     {
@@ -452,7 +478,7 @@ void main()
             }
         }
 
-        public DeviceTexture CreateCircle(int radius, int draws = 1)
+        public DeviceTexture CreateCircle(int radius, RgbaFloat color, int draws = 1)
         {
             draws = Math.Max(1, draws);
             int outerRadius = radius * 2 + 2;
@@ -482,13 +508,20 @@ void main()
 
                     if (x >= 0 && x < outerRadius && y >= 0 && y < outerRadius)
                     {
-                        data[y * outerRadius + x] = new RgbaFloat(1, 1, 1, 1);
+                        data[y * outerRadius + x] = color;
                     }
                 }
                 radius--;
             }
 
-            return new DeviceTexture(_graphicsDevice, size, size, data);
+            return new DeviceTexture(
+                _graphicsDevice,
+                _resourceLayout,
+                _projectionBuffer,
+                _sampler,
+                size,
+                size,
+                data);
         }
 
         void SimpleOrbit()
@@ -540,7 +573,7 @@ void main()
             for (int i = 0; i < Bodies.Length; i++)
             {
                 Bodies[i].Texture?.Dispose();
-                Bodies[i].Texture = CreateCircle((int)Bodies[i].Radius, (int)(0.200f * Bodies[i].Radius));
+                Bodies[i].Texture = CreateCircle((int)Bodies[i].Radius, Bodies[i].Color, (int)(0.200f * Bodies[i].Radius));
             }
         }
 
@@ -922,16 +955,9 @@ void main()
             {
                 if (Bodies[i].Texture == null) continue;
 
-                DeviceTexture texture = Bodies[i].Texture;
+                DeviceTexture texture = Bodies[i].Texture!;
 
-                // Create resource set for this body
-                ResourceSet resourceSet = _graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(
-                    _resourceLayout,
-                    _projectionBuffer,
-                    texture.TextureView,
-                    _sampler));
-
-                _commandList.SetGraphicsResourceSet(0, resourceSet);
+                _commandList.SetGraphicsResourceSet(0, texture.ResourceSet);
 
                 // Update vertex positions for this sprite
                 Vector2 position = nextPosition[i];
@@ -950,8 +976,6 @@ void main()
                 _commandList.UpdateBuffer(_vertexBuffer, 0, vertices);
                 _commandList.DrawIndexed(6);
 
-                resourceSet.Dispose();
-
                 // Update physics
                 Bodies[i].Position = nextPosition[i];
                 Bodies[i].Velocity = nextVelocity[i];
@@ -960,13 +984,7 @@ void main()
             // Draw controls texture in top-left
             if (_controlsTexture != null)
             {
-                ResourceSet controlSet = _graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(
-                    _resourceLayout,
-                    _projectionBuffer,
-                    _controlsTexture.TextureView,
-                    _sampler));
-
-                _commandList.SetGraphicsResourceSet(0, controlSet);
+                _commandList.SetGraphicsResourceSet(0, _controlsTexture.ResourceSet);
 
                 Vector2 pos = new Vector2(8, 8); // margin from top-left
                 Vector2 size = new Vector2((float)_controlsTexture.Width, (float)_controlsTexture.Height);
@@ -981,8 +999,6 @@ void main()
 
                 _commandList.UpdateBuffer(_vertexBuffer, 0, ctrlVerts);
                 _commandList.DrawIndexed(6);
-
-                controlSet.Dispose();
             }
 
             _commandList.End();
@@ -998,7 +1014,6 @@ void main()
             }
 
             _controlsTexture?.Dispose();
-            _greenPixelResourceSet?.Dispose();
             _greenPixel?.Dispose();
             _pipeline.Dispose();
             _commandList.Dispose();
